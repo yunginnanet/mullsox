@@ -2,16 +2,11 @@ package mullsox
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
-
-const baseEndpoint = "am.i.mullvad.net"
-const Ipv4Endpoint = `https://ipv4.` + baseEndpoint
-const Ipv6Endpoint = `https://ipv6.` + baseEndpoint
 
 func CheckIP4(ctx context.Context, h *http.Client) (details *MyIPDetails, err error) {
 	return checkIP(ctx, h, false)
@@ -68,6 +63,8 @@ func CheckIP(ctx context.Context, h *http.Client) (v4details *MyIPDetails, v6det
 				v6details = res.details
 			case !res.ipv6:
 				v4details = res.details
+			default:
+				panic("malformed result")
 			}
 			finished++
 		default:
@@ -85,9 +82,9 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 	)
 	switch ipv6 {
 	case true:
-		target = Ipv6Endpoint + "/json"
+		target = ipv6Endpoint + "/json"
 	default:
-		target = Ipv4Endpoint + "/json"
+		target = ipv4Endpoint + "/json"
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
 	resp, err = h.Do(req)
@@ -99,6 +96,9 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 		return
 	}
 	cytes, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
 	err = json.Unmarshal(cytes, &details)
 	return
 }

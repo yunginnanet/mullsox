@@ -2,7 +2,6 @@ package mullsox
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
