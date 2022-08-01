@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 func TestCheckIP4(t *testing.T) {
@@ -13,7 +15,7 @@ func TestCheckIP4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
-	v4j, err4j := json.Marshal(v4)
+	v4j, err4j := sonic.Marshal(v4)
 	if err4j != nil {
 		t.Fatalf("%s", err4j.Error())
 	}
@@ -26,7 +28,7 @@ func TestCheckIP6(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
-	v6j, err6j := json.Marshal(v6)
+	v6j, err6j := sonic.Marshal(v6)
 	if err6j != nil {
 		t.Fatalf("%s", err6j.Error())
 	}
@@ -41,11 +43,11 @@ func TestCheckIPConcurrent(t *testing.T) {
 			t.Fatalf("%s", err.Error())
 		}
 	}
-	v4j, err4j := json.Marshal(v4)
+	v4j, err4j := sonic.Marshal(v4)
 	if err4j != nil {
 		t.Fatalf("%s", err4j.Error())
 	}
-	v6j, err6j := json.Marshal(v6)
+	v6j, err6j := sonic.Marshal(v6)
 	if err6j != nil {
 		t.Fatalf("%s", err6j.Error())
 	}

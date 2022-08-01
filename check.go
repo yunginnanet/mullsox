@@ -3,9 +3,10 @@ package mullsox
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"github.com/bytedance/sonic/decoder"
 )
 
 func CheckIP4(ctx context.Context, h *http.Client) (details *MyIPDetails, err error) {
@@ -77,14 +78,13 @@ func CheckIP(ctx context.Context, h *http.Client) (v4details *MyIPDetails, v6det
 func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetails, err error) {
 	var (
 		resp   *http.Response
-		cytes  []byte
 		target string
 	)
 	switch ipv6 {
 	case true:
-		target = ipv6Endpoint + "/json"
+		target = EndpointCheck6 + "/json"
 	default:
-		target = ipv4Endpoint + "/json"
+		target = EndpointCheck4 + "/json"
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
 	resp, err = h.Do(req)
@@ -95,10 +95,7 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 		err = fmt.Errorf("bad status code from %s : %s", target, resp.Status)
 		return
 	}
-	cytes, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-	err = json.Unmarshal(cytes, &details)
+	fizz := decoder.NewStreamDecoder(resp.Body)
+	err = fizz.Decode(&details)
 	return
 }
