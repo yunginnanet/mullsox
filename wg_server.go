@@ -3,6 +3,7 @@ package mullsox
 type WireguardServer struct {
 	Parent      *MullvadServer
 	WGPublicKey string
+	Leapfrog    int
 	In4         string
 	In6         string
 	// Out addresses should be immutable

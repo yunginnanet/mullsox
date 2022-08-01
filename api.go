@@ -96,9 +96,12 @@ func (servers *relays) getWireguards() ([]WireguardServer, error) {
 		if srv.Type != "wireguard" {
 			continue
 		}
+		if srv.MultihopPort < 0 {
+			continue
+		}
 		pub, err := encodeBase64ToHex(srv.Pubkey)
 		if err != nil {
-			pub = srv.Pubkey
+			return nil, err
 		}
 		wgs = append(wgs, WireguardServer{
 			Parent:      &srv,

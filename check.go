@@ -3,10 +3,11 @@ package mullsox
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
-	"github.com/bytedance/sonic/decoder"
+	json "github.com/pquerna/ffjson/ffjson"
 )
 
 func CheckIP4(ctx context.Context, h *http.Client) (details *MyIPDetails, err error) {
@@ -95,7 +96,11 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 		err = fmt.Errorf("bad status code from %s : %s", target, resp.Status)
 		return
 	}
-	fizz := decoder.NewStreamDecoder(resp.Body)
-	err = fizz.Decode(&details)
+	rbytes, err := io.ReadAll(resp.Body)
+	println(string(rbytes))
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal(rbytes, &details)
 	return
 }
