@@ -2,6 +2,7 @@ package mullsox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,10 +124,41 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *IPDetails
 
 // AmIMullvad checks if you are currently connecting through a Mullvad relay.
 // Returns the mullvad server you are connected to if any, and any error that occured
-func AmIMullvad(ctx context.Context) (*MullvadServer, error) {
-	// v4, v6, err := CheckIP(ctx, http.DefaultClient)
-	// m
-	// if err != nil {
-	// }
-	return nil, nil
+//
+//goland:noinspection GoNilness
+func AmIMullvad(ctx context.Context, client *http.Client) (MullvadServer, error) {
+	me, err := CheckIP(ctx, client)
+	if me == nil || me.V4 == nil && me.V6 == nil {
+		return MullvadServer{}, err
+	}
+	if me.V4 != nil && !me.V4.MullvadExitIP {
+		return MullvadServer{}, err
+	}
+	if me.V6 != nil && !me.V6.MullvadExitIP {
+		return MullvadServer{}, err
+	}
+
+	relays, err := GetMullvadServers()
+	if err != nil {
+		return MullvadServer{}, err
+	}
+
+	isMullvad := false
+	if me.V4 != nil && me.V4.MullvadExitIP {
+		isMullvad = true
+		if relays.Has(me.V4.MullvadExitIPHostname) {
+			return relays.Get(me.V4.MullvadExitIPHostname), nil
+		}
+	}
+	if me.V6 != nil && me.V6.MullvadExitIP {
+		isMullvad = true
+		if relays.Has(me.V6.MullvadExitIPHostname) {
+			return relays.Get(me.V6.MullvadExitIPHostname), nil
+		}
+	}
+	if isMullvad {
+		return MullvadServer{},
+			errors.New("could not find mullvad server in relay list, but you are connected to a mullvad exit ip")
+	}
+	return MullvadServer{}, nil
 }

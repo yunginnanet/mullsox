@@ -32,21 +32,25 @@ type IPDetails struct {
 }
 
 type MullvadServer struct {
-	Hostname             string `json:"hostname"`
-	CountryCode          string `json:"country_code"`
-	CountryName          string `json:"country_name"`
-	CityCode             string `json:"city_code"`
-	CityName             string `json:"city_name"`
-	Active               bool   `json:"active"`
-	Owned                bool   `json:"owned"`
-	Provider             string `json:"provider"`
-	Ipv4AddrIn           string `json:"ipv4_addr_in"`
-	Ipv6AddrIn           string `json:"ipv6_addr_in"`
-	NetworkPortSpeed     int    `json:"network_port_speed"`
-	Type                 string `json:"type"`
-	Pubkey               string `json:"pubkey,omitempty"`
-	MultihopPort         int    `json:"multihop_port,omitempty"`
-	SocksName            string `json:"socks_name,omitempty"`
-	SSHFingerprintSHA256 string `json:"ssh_fingerprint_sha256,omitempty"`
-	SSHFingerprintMD5    string `json:"ssh_fingerprint_md5,omitempty"`
+	Hostname             string        `json:"hostname"`
+	CountryCode          string        `json:"country_code"`
+	CountryName          string        `json:"country_name"`
+	CityCode             string        `json:"city_code"`
+	CityName             string        `json:"city_name"`
+	Active               bool          `json:"active"`
+	Owned                bool          `json:"owned"`
+	Provider             string        `json:"provider"`
+	Ipv4AddrIn           string        `json:"ipv4_addr_in"`
+	Ipv6AddrIn           *string       `json:"ipv6_addr_in"`
+	NetworkPortSpeed     int           `json:"network_port_speed"`
+	Stboot               bool          `json:"stboot"`
+	Type                 string        `json:"type"`
+	StatusMessages       []interface{} `json:"status_messages"`
+	Pubkey               string        `json:"pubkey,omitempty"`
+	MultihopPort         int           `json:"multihop_port,omitempty"`
+	SocksName            string        `json:"socks_name,omitempty"`
+	SocksPort            int           `json:"socks_port,omitempty"`
+	Ipv4V2Ray            *string       `json:"ipv4_v2ray,omitempty"`
+	SshFingerprintSha256 string        `json:"ssh_fingerprint_sha256,omitempty"`
+	SshFingerprintMd5    string        `json:"ssh_fingerprint_md5,omitempty"`
 }
