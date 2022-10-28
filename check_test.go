@@ -39,7 +39,7 @@ func TestCheckIP6(t *testing.T) {
 
 func TestCheckIPConcurrent(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
-	me, err := CheckIP(ctx, http.DefaultClient)
+	me, err := CheckIP(ctx)
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
@@ -70,8 +70,9 @@ func TestCheckIPConcurrent(t *testing.T) {
 }
 
 func TestAmIMullvad(t *testing.T) {
+	servers := NewRelays()
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
-	am, err := AmIMullvad(ctx, http.DefaultClient)
+	am, err := servers.AmIMullvad(ctx)
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}

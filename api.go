@@ -1,5 +1,7 @@
 package mullsox
 
+const useragent = "mullsox/0.0.1"
+
 const (
 	baseDomain       = "mullvad.net"
 	baseEndpoint     = "am.i." + baseDomain

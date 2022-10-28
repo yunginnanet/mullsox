@@ -14,21 +14,23 @@ func (mvs MullvadServer) String() string {
 	return mvs.Hostname
 }
 
-type Relays struct {
+type Checker struct {
 	m    map[string]MullvadServer
 	size int
+	url  string
 	*sync.RWMutex
 }
 
-func NewRelays() *Relays {
-	r := &Relays{
+func NewRelays() *Checker {
+	r := &Checker{
 		m:       make(map[string]MullvadServer),
 		RWMutex: &sync.RWMutex{},
+		url:     EndpointRelays,
 	}
 	return r
 }
 
-func (r *Relays) Slice() []MullvadServer {
+func (r *Checker) Slice() []MullvadServer {
 	r.RLock()
 	defer r.RUnlock()
 	var servers []MullvadServer
@@ -38,46 +40,78 @@ func (r *Relays) Slice() []MullvadServer {
 	return servers
 }
 
-func (r *Relays) Has(hostname string) bool {
+func (r *Checker) Has(hostname string) bool {
 	r.RLock()
 	_, ok := r.m[hostname]
 	r.RUnlock()
 	return ok
 }
 
-func (r *Relays) Add(server MullvadServer) {
+func (r *Checker) Add(server MullvadServer) {
 	r.Lock()
 	r.m[server.Hostname] = server
 	r.Unlock()
 }
 
-func (r *Relays) Get(hostname string) MullvadServer {
+func (r *Checker) Get(hostname string) MullvadServer {
 	r.RLock()
 	defer r.RUnlock()
 	return r.m[hostname]
 }
 
-func GetMullvadServers() (*Relays, error) {
-	var servers = NewRelays()
-	var serverSlice []MullvadServer
+func (r *Checker) clear() {
+	for k := range r.m {
+		delete(r.m, k)
+	}
+}
+
+func getContentSize(url string) int {
 	req := fasthttp.AcquireRequest()
 	res := fasthttp.AcquireResponse()
 	defer func() {
 		fasthttp.ReleaseRequest(req)
 		fasthttp.ReleaseResponse(res)
 	}()
-	req.Header.SetUserAgent("mulls0x/v0.0.1")
+	req.Header.SetUserAgent(useragent)
+	req.Header.SetMethod(http.MethodHead)
+	req.SetRequestURI(url)
+	if err := fasthttp.Do(req, res); err != nil {
+		return -1
+	}
+	return res.Header.ContentLength()
+}
+
+func (r *Checker) Update() error {
+	var serverSlice []MullvadServer
+	if r.size > 0 {
+		current := getContentSize(r.url)
+		if current == r.size {
+			return nil
+		}
+	}
+
+	req := fasthttp.AcquireRequest()
+	res := fasthttp.AcquireResponse()
+	defer func() {
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(res)
+	}()
+	req.Header.SetUserAgent(useragent)
 	req.Header.SetContentType("application/json")
 	req.Header.SetMethod(http.MethodGet)
-	req.SetRequestURI(EndpointRelays)
+	req.SetRequestURI(r.url)
 	if err := fasthttp.Do(req, res); err != nil {
-		return nil, err
+		return err
 	}
 	if err := json.Unmarshal(res.Body(), &serverSlice); err != nil {
-		return nil, err
+		return err
 	}
+	r.Lock()
+	r.clear()
 	for _, server := range serverSlice {
-		servers.Add(server)
+		r.m[server.Hostname] = server
 	}
-	return servers, nil
+	r.size = res.Header.ContentLength()
+	r.Unlock()
+	return nil
 }
