@@ -5,76 +5,91 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
+
+	"github.com/hashicorp/go-multierror"
 )
 
-func CheckIP4(ctx context.Context, h *http.Client) (details *MyIPDetails, err error) {
+type MyIPDetails struct {
+	V4 *IPDetails
+	V6 *IPDetails
+}
+
+func CheckIP4(ctx context.Context, h *http.Client) (details *IPDetails, err error) {
 	return checkIP(ctx, h, false)
 }
 
-func CheckIP6(ctx context.Context, h *http.Client) (details *MyIPDetails, err error) {
+func CheckIP6(ctx context.Context, h *http.Client) (details *IPDetails, err error) {
 	return checkIP(ctx, h, true)
 }
 
-func CheckIP(ctx context.Context, h *http.Client) (v4details *MyIPDetails, v6details *MyIPDetails, errs []error) {
+func CheckIP(ctx context.Context, h *http.Client) (*MyIPDetails, error) {
 	type result struct {
-		details *MyIPDetails
+		details *IPDetails
 		ipv6    bool
-		err     error
 	}
 
-	var (
-		resChan  = make(chan result)
-		finished = 0
-	)
+	var errGroup multierror.Group
+	var resChan = make(chan result)
 
-	check := func(resChan chan result, ipv6 bool) {
+	check := func(resChan chan result, ipv6 bool) error {
+		var err error
 		var r = result{ipv6: ipv6}
-		r.details, r.err = checkIP(ctx, h, r.ipv6)
-		select {
-		case <-ctx.Done():
-			r.err = ctx.Err()
-			resChan <- r
-		case resChan <- r:
-			//
-		}
-	}
-
-	go check(resChan, false)
-	go check(resChan, true)
-
-	for {
-		if finished == 2 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			errs = append(errs, ctx.Err())
-			return
-		case res := <-resChan:
-			switch {
-			case res.err != nil:
-				prefix := "(v4)"
-				if res.ipv6 {
-					prefix = "(v6)"
-				}
-				errs = append(errs, fmt.Errorf("%s %s", prefix, res.err.Error()))
-			case res.ipv6:
-				v6details = res.details
-			case !res.ipv6:
-				v4details = res.details
-			default:
-				panic("malformed result")
+		r.details, err = checkIP(ctx, h, r.ipv6)
+		if err != nil {
+			if r.ipv6 {
+				err = fmt.Errorf("error checking ipv6: %w", err)
+			} else {
+				err = fmt.Errorf("error checking ipv4: %w", err)
 			}
-			finished++
-		default:
-			time.Sleep(50 * time.Millisecond)
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case resChan <- r:
+			return nil
 		}
 	}
-	return
+
+	errGroup.Go(func() error {
+		return check(resChan, false)
+	})
+	errGroup.Go(func() error {
+		return check(resChan, true)
+	})
+
+	var myip = new(MyIPDetails)
+
+	var err error
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case res, ok := <-resChan:
+				switch {
+				case res.ipv6:
+					myip.V6 = res.details
+				case !res.ipv6:
+					myip.V4 = res.details
+				case !ok:
+					return
+				default:
+					panic("malformed result")
+				}
+			}
+		}
+	}()
+
+	err = errGroup.Wait()
+	err = err.(*multierror.Error).ErrorOrNil()
+	close(resChan)
+
+	return myip, err
 }
 
-func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetails, err error) {
+func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *IPDetails, err error) {
 	var (
 		resp   *http.Response
 		cytes  []byte
@@ -82,9 +97,9 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 	)
 	switch ipv6 {
 	case true:
-		target = ipv6Endpoint + "/json"
+		target = EndpointCheck6
 	default:
-		target = ipv4Endpoint + "/json"
+		target = EndpointCheck4
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
 	resp, err = h.Do(req)
@@ -101,4 +116,14 @@ func checkIP(ctx context.Context, h *http.Client, ipv6 bool) (details *MyIPDetai
 	}
 	err = json.Unmarshal(cytes, &details)
 	return
+}
+
+// AmIMullvad checks if you are currently connecting through a Mullvad relay.
+// Returns the mullvad server you are connected to if any, and any error that occured
+func AmIMullvad(ctx context.Context) (*MullvadServer, error) {
+	// v4, v6, err := CheckIP(ctx, http.DefaultClient)
+	// m
+	// if err != nil {
+	// }
+	return nil, nil
 }

@@ -35,17 +35,15 @@ func TestCheckIP6(t *testing.T) {
 
 func TestCheckIPConcurrent(t *testing.T) {
 	ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
-	v4, v6, errs := CheckIP(ctx, http.DefaultClient)
-	for _, err := range errs {
-		if err != nil {
-			t.Fatalf("%s", err.Error())
-		}
+	me, err := CheckIP(ctx, http.DefaultClient)
+	if err != nil {
+		t.Fatalf("%s", err.Error())
 	}
-	v4j, err4j := json.Marshal(v4)
+	v4j, err4j := json.Marshal(me.V4)
 	if err4j != nil {
 		t.Fatalf("%s", err4j.Error())
 	}
-	v6j, err6j := json.Marshal(v6)
+	v6j, err6j := json.Marshal(me.V6)
 	if err6j != nil {
 		t.Fatalf("%s", err6j.Error())
 	}
