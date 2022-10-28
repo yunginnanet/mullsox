@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 func TestCheckIP4(t *testing.T) {
@@ -47,6 +49,19 @@ func TestCheckIPConcurrent(t *testing.T) {
 	if err6j != nil {
 		t.Fatalf("%s", err6j.Error())
 	}
-	t.Logf(string(v4j))
-	t.Logf(string(v6j))
+	unmarshaled := &MyIPDetails{}
+	unv4 := &IPDetails{}
+	unv6 := &IPDetails{}
+
+	if err := json.Unmarshal(v4j, unv4); err != nil {
+		t.Fatalf("%s", err.Error())
+	}
+	if err := json.Unmarshal(v6j, unv6); err != nil {
+		t.Fatalf("%s", err.Error())
+	}
+	unmarshaled.V4 = unv4
+	unmarshaled.V6 = unv6
+	
+	t.Logf(spew.Sdump(unmarshaled.V4))
+	t.Logf(spew.Sdump(unmarshaled.V6))
 }

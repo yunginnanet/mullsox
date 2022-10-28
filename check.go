@@ -10,8 +10,8 @@ import (
 )
 
 type MyIPDetails struct {
-	V4 *IPDetails
-	V6 *IPDetails
+	V4 *IPDetails `json:"ipv4,omitempty"`
+	V6 *IPDetails `json:"ipv6,omitempty"`
 }
 
 func CheckIP4(ctx context.Context, h *http.Client) (details *IPDetails, err error) {
@@ -63,7 +63,7 @@ func CheckIP(ctx context.Context, h *http.Client) (*MyIPDetails, error) {
 	var err error
 
 	go func() {
-		for {
+		collect := func() {
 			select {
 			case <-ctx.Done():
 				return
@@ -79,6 +79,9 @@ func CheckIP(ctx context.Context, h *http.Client) (*MyIPDetails, error) {
 					panic("malformed result")
 				}
 			}
+		}
+		for n := 0; n < 2; n++ {
+			collect()
 		}
 	}()
 

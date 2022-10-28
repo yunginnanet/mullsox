@@ -3,6 +3,7 @@ module git.tcp.direct/kayos/mullsox
 go 1.18
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/json-iterator/go v1.1.12
 	github.com/valyala/fasthttp v1.41.0
