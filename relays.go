@@ -1,11 +1,10 @@
 package mullsox
 
 import (
-	"net/http"
 	"sync"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/valyala/fasthttp"
+	http "github.com/valyala/fasthttp"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -15,13 +14,13 @@ func (mvs MullvadServer) String() string {
 }
 
 type Checker struct {
-	m    map[string]MullvadServer
-	size int
-	url  string
+	m          map[string]MullvadServer
+	cachedSize int
+	url        string
 	*sync.RWMutex
 }
 
-func NewRelays() *Checker {
+func NewChecker() *Checker {
 	r := &Checker{
 		m:       make(map[string]MullvadServer),
 		RWMutex: &sync.RWMutex{},
@@ -30,88 +29,88 @@ func NewRelays() *Checker {
 	return r
 }
 
-func (r *Checker) Slice() []MullvadServer {
-	r.RLock()
-	defer r.RUnlock()
+func (c *Checker) Slice() []MullvadServer {
+	c.RLock()
+	defer c.RUnlock()
 	var servers []MullvadServer
-	for _, server := range r.m {
+	for _, server := range c.m {
 		servers = append(servers, server)
 	}
 	return servers
 }
 
-func (r *Checker) Has(hostname string) bool {
-	r.RLock()
-	_, ok := r.m[hostname]
-	r.RUnlock()
+func (c *Checker) Has(hostname string) bool {
+	c.RLock()
+	_, ok := c.m[hostname]
+	c.RUnlock()
 	return ok
 }
 
-func (r *Checker) Add(server MullvadServer) {
-	r.Lock()
-	r.m[server.Hostname] = server
-	r.Unlock()
+func (c *Checker) Add(server MullvadServer) {
+	c.Lock()
+	c.m[server.Hostname] = server
+	c.Unlock()
 }
 
-func (r *Checker) Get(hostname string) MullvadServer {
-	r.RLock()
-	defer r.RUnlock()
-	return r.m[hostname]
+func (c *Checker) Get(hostname string) MullvadServer {
+	c.RLock()
+	defer c.RUnlock()
+	return c.m[hostname]
 }
 
-func (r *Checker) clear() {
-	for k := range r.m {
-		delete(r.m, k)
+func (c *Checker) clear() {
+	for k := range c.m {
+		delete(c.m, k)
 	}
 }
 
 func getContentSize(url string) int {
-	req := fasthttp.AcquireRequest()
-	res := fasthttp.AcquireResponse()
+	req := http.AcquireRequest()
+	res := http.AcquireResponse()
 	defer func() {
-		fasthttp.ReleaseRequest(req)
-		fasthttp.ReleaseResponse(res)
+		http.ReleaseRequest(req)
+		http.ReleaseResponse(res)
 	}()
 	req.Header.SetUserAgent(useragent)
 	req.Header.SetMethod(http.MethodHead)
 	req.SetRequestURI(url)
-	if err := fasthttp.Do(req, res); err != nil {
+	if err := http.Do(req, res); err != nil {
 		return -1
 	}
 	return res.Header.ContentLength()
 }
 
-func (r *Checker) Update() error {
+func (c *Checker) Update() error {
 	var serverSlice []MullvadServer
-	if r.size > 0 {
-		current := getContentSize(r.url)
-		if current == r.size {
+	if c.cachedSize > 0 {
+		latestSize := getContentSize(c.url)
+		if latestSize == c.cachedSize {
 			return nil
 		}
 	}
 
-	req := fasthttp.AcquireRequest()
-	res := fasthttp.AcquireResponse()
+	req := http.AcquireRequest()
+	res := http.AcquireResponse()
 	defer func() {
-		fasthttp.ReleaseRequest(req)
-		fasthttp.ReleaseResponse(res)
+		http.ReleaseRequest(req)
+		http.ReleaseResponse(res)
 	}()
 	req.Header.SetUserAgent(useragent)
 	req.Header.SetContentType("application/json")
 	req.Header.SetMethod(http.MethodGet)
-	req.SetRequestURI(r.url)
-	if err := fasthttp.Do(req, res); err != nil {
+	req.SetRequestURI(c.url)
+	if err := http.Do(req, res); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(res.Body(), &serverSlice); err != nil {
 		return err
 	}
-	r.Lock()
-	r.clear()
+	c.Lock()
+	c.clear()
 	for _, server := range serverSlice {
-		r.m[server.Hostname] = server
+		c.m[server.Hostname] = server
 	}
-	r.size = res.Header.ContentLength()
-	r.Unlock()
+	c.cachedSize = res.Header.ContentLength()
+	c.Unlock()
 	return nil
 }

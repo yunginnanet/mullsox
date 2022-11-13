@@ -2,7 +2,6 @@ package mullsox
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
@@ -10,8 +9,7 @@ import (
 )
 
 func TestCheckIP4(t *testing.T) {
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
-	v4, err := CheckIP4(ctx, http.DefaultClient)
+	v4, err := CheckIP4()
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
@@ -20,12 +18,10 @@ func TestCheckIP4(t *testing.T) {
 		t.Fatalf("%s", err4j.Error())
 	}
 	t.Logf(string(v4j))
-	cancel()
 }
 
 func TestCheckIP6(t *testing.T) {
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
-	v6, err := CheckIP6(ctx, http.DefaultClient)
+	v6, err := CheckIP6()
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
@@ -34,7 +30,6 @@ func TestCheckIP6(t *testing.T) {
 		t.Fatalf("%s", err6j.Error())
 	}
 	t.Logf(string(v6j))
-	cancel()
 }
 
 func TestCheckIPConcurrent(t *testing.T) {
@@ -70,7 +65,7 @@ func TestCheckIPConcurrent(t *testing.T) {
 }
 
 func TestAmIMullvad(t *testing.T) {
-	servers := NewRelays()
+	servers := NewChecker()
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(15*time.Second))
 	am, err := servers.AmIMullvad(ctx)
 	if err != nil {

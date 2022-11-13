@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"time"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/valyala/fasthttp"
+	http "github.com/valyala/fasthttp"
 )
 
 type MyIPDetails struct {
@@ -15,12 +15,12 @@ type MyIPDetails struct {
 	V6 *IPDetails `json:"ipv6,omitempty"`
 }
 
-func CheckIP4(ctx context.Context, h *http.Client) (details *IPDetails, err error) {
-	return checkIP(ctx, false)
+func CheckIP4() (details *IPDetails, err error) {
+	return checkIP(false)
 }
 
-func CheckIP6(ctx context.Context, h *http.Client) (details *IPDetails, err error) {
-	return checkIP(ctx, true)
+func CheckIP6() (details *IPDetails, err error) {
+	return checkIP(true)
 }
 
 func CheckIP(ctx context.Context) (*MyIPDetails, error) {
@@ -35,7 +35,7 @@ func CheckIP(ctx context.Context) (*MyIPDetails, error) {
 	check := func(resChan chan result, ipv6 bool) error {
 		var err error
 		var r = result{ipv6: ipv6}
-		r.details, err = checkIP(ctx, r.ipv6)
+		r.details, err = checkIP(r.ipv6)
 		if err != nil {
 			if r.ipv6 {
 				err = fmt.Errorf("error checking ipv6: %w", err)
@@ -93,7 +93,7 @@ func CheckIP(ctx context.Context) (*MyIPDetails, error) {
 	return myip, err
 }
 
-func checkIP(ctx context.Context, ipv6 bool) (details *IPDetails, err error) {
+func checkIP(ipv6 bool) (details *IPDetails, err error) {
 	var target string
 	switch ipv6 {
 	case true:
@@ -101,19 +101,19 @@ func checkIP(ctx context.Context, ipv6 bool) (details *IPDetails, err error) {
 	default:
 		target = EndpointCheck4
 	}
-	req := fasthttp.AcquireRequest()
-	res := fasthttp.AcquireResponse()
+	req := http.AcquireRequest()
+	res := http.AcquireResponse()
 	defer func() {
-		fasthttp.ReleaseRequest(req)
-		fasthttp.ReleaseResponse(res)
+		http.ReleaseRequest(req)
+		http.ReleaseResponse(res)
 	}()
 	req.SetRequestURI(target)
-	req.Header.SetMethod("GET")
+	req.Header.SetMethod(http.MethodGet)
 	req.Header.SetUserAgent(useragent)
-	client := fasthttp.Client{}
+	client := http.Client{}
 	client.DialDualStack = true
 
-	err = client.Do(req, res)
+	err = client.DoTimeout(req, res, 15*time.Second)
 	if err != nil {
 		return
 	}
@@ -130,9 +130,9 @@ func checkIP(ctx context.Context, ipv6 bool) (details *IPDetails, err error) {
 // Returns the mullvad server you are connected to if any, and any error that occured
 //
 //goland:noinspection GoNilness
-func (r *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
+func (c *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
 	me, err := CheckIP(ctx)
-	if me == nil || me.V4 == nil && me.V6 == nil {
+	if me == nil || me.V4 == nil && me.V6 == nil || err != nil {
 		return MullvadServer{}, err
 	}
 	if me.V4 != nil && !me.V4.MullvadExitIP {
@@ -142,7 +142,7 @@ func (r *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
 		return MullvadServer{}, err
 	}
 
-	err = r.Update()
+	err = c.Update()
 	if err != nil {
 		return MullvadServer{}, err
 	}
@@ -150,14 +150,14 @@ func (r *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
 	isMullvad := false
 	if me.V4 != nil && me.V4.MullvadExitIP {
 		isMullvad = true
-		if r.Has(me.V4.MullvadExitIPHostname) {
-			return r.Get(me.V4.MullvadExitIPHostname), nil
+		if c.Has(me.V4.MullvadExitIPHostname) {
+			return c.Get(me.V4.MullvadExitIPHostname), nil
 		}
 	}
 	if me.V6 != nil && me.V6.MullvadExitIP {
 		isMullvad = true
-		if r.Has(me.V6.MullvadExitIPHostname) {
-			return r.Get(me.V6.MullvadExitIPHostname), nil
+		if c.Has(me.V6.MullvadExitIPHostname) {
+			return c.Get(me.V6.MullvadExitIPHostname), nil
 		}
 	}
 	if isMullvad {

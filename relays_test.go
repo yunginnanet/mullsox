@@ -2,12 +2,10 @@ package mullsox
 
 import (
 	"testing"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 func TestGetMullvadServers(t *testing.T) {
-	servers := NewRelays()
+	servers := NewChecker()
 
 	update := func() {
 		err := servers.Update()
@@ -19,7 +17,7 @@ func TestGetMullvadServers(t *testing.T) {
 
 	t.Run("GetMullvadServers", func(t *testing.T) {
 		update()
-		t.Logf(spew.Sdump(servers.Slice()))
+		// t.Logf(spew.Sdump(servers.Slice()))
 	})
 	var last int
 	var lastSlice []MullvadServer
@@ -31,14 +29,14 @@ func TestGetMullvadServers(t *testing.T) {
 		update()
 		update()
 		update()
-		last = servers.size
+		last = servers.cachedSize
 		lastSlice = servers.Slice()
 	})
 	t.Run("GetMullvadServersChanged", func(t *testing.T) {
 		servers.url = "https://api.mullvad.net/www/relays/openvpn/"
 		update()
-		if last == servers.size {
-			t.Fatalf("expected %d to not equal %d", last, servers.size)
+		if last == servers.cachedSize {
+			t.Fatalf("expected %d to not equal %d", last, servers.cachedSize)
 		}
 		if len(servers.Slice()) == len(lastSlice) {
 			t.Fatalf("expected %d to not equal %d", len(lastSlice), len(servers.Slice()))
