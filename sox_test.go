@@ -26,6 +26,7 @@ func TestChecker_GetSOCKS(t *testing.T) {
 			t.Fatalf("%s", err.Error())
 		}
 		gotSox, errs := c.GetAndVerifySOCKS()
+		count := 0
 		for sox := range gotSox {
 			select {
 			case err := <-errs:
@@ -34,7 +35,9 @@ func TestChecker_GetSOCKS(t *testing.T) {
 				}
 			default:
 				t.Logf("got verified: %s", sox.String())
+				count++
 			}
 		}
+		t.Logf("got %d active mullvad SOCKS5 servers", count)
 	})
 }

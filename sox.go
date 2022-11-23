@@ -10,7 +10,7 @@ import (
 )
 
 func persistentResolver(hostname string) []netip.Addr {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var ips []netip.Addr
 	if hostname == "" {
@@ -87,7 +87,7 @@ func (c *Checker) GetAndVerifySOCKS() (chan netip.AddrPort, chan error) {
 		go func(prx netip.AddrPort) {
 			defer wg.Done()
 			var conn net.Conn
-			conn, err = net.DialTimeout("tcp", prx.String(), 5*time.Second)
+			conn, err = net.DialTimeout("tcp", prx.String(), 10*time.Second)
 			if err != nil {
 				errs <- err
 			}
