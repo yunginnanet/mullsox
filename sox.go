@@ -21,7 +21,7 @@ func persistentResolver(hostname string) []netip.Addr {
 		var res []netip.Addr
 		go func() {
 			res, err = net.DefaultResolver.LookupNetIP(ctx, "ip", hostname)
-			if err == nil && len(res) > 0 {
+			if err == nil && res != nil && len(res) > 0 {
 				ips = res
 				cancel()
 			}
