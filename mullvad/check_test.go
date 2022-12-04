@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 import (
 	"context"

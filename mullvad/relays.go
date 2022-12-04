@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 import (
 	"sync"
@@ -80,7 +80,7 @@ func getContentSize(url string) int {
 	return res.Header.ContentLength()
 }
 
-func (c *Checker) Update() error {
+func (c *Checker) update() error {
 	var serverSlice []MullvadServer
 	if c.cachedSize > 0 {
 		latestSize := getContentSize(c.url)
@@ -113,4 +113,11 @@ func (c *Checker) Update() error {
 	c.cachedSize = res.Header.ContentLength()
 	c.Unlock()
 	return nil
+}
+
+func (c *Checker) GetRelays() ([]MullvadServer, error) {
+	if err := c.update(); err != nil {
+		return nil, err
+	}
+	return c.Slice(), nil
 }

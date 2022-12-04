@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 import (
 	"context"
@@ -142,7 +142,7 @@ func (c *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
 		return MullvadServer{}, err
 	}
 
-	err = c.Update()
+	err = c.update()
 	if err != nil {
 		return MullvadServer{}, err
 	}

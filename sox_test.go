@@ -2,15 +2,14 @@ package mullsox
 
 import (
 	"testing"
+
+	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
 func TestChecker_GetSOCKS(t *testing.T) {
-	c := NewChecker()
+	c := mullvad.NewChecker()
 	t.Run("GetSOCKS", func(t *testing.T) {
-		if err := c.Update(); err != nil {
-			t.Fatalf("%s", err.Error())
-		}
-		gotSox, err := c.GetSOCKS()
+		gotSox, err := GetSOCKS(c)
 		if err != nil {
 			t.Error(err)
 		}
@@ -22,10 +21,7 @@ func TestChecker_GetSOCKS(t *testing.T) {
 	})
 
 	t.Run("GetAndVerifySOCKS", func(t *testing.T) {
-		if err := c.Update(); err != nil {
-			t.Fatalf("%s", err.Error())
-		}
-		gotSox, errs := c.GetAndVerifySOCKS()
+		gotSox, errs := GetAndVerifySOCKS(c)
 		count := 0
 		for sox := range gotSox {
 			select {

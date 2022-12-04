@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 const useragent = "mullsox/0.0.1"
 

@@ -6,48 +6,54 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
-func persistentResolver(hostname string) []netip.Addr {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var ips []netip.Addr
-	if hostname == "" {
-		return ips
-	}
-	for n := 0; n < 5; n++ {
-		var err error
-		var res []netip.Addr
-		go func() {
-			res, err = net.DefaultResolver.LookupNetIP(ctx, "ip", hostname)
-			if err == nil && res != nil && len(res) > 0 {
-				ips = res
-				cancel()
-			}
-		}()
-		time.Sleep(1 * time.Second)
-	}
-	<-ctx.Done()
-	return ips
+const MullvadInternalDNS4 = "10.64.0.1:53"
+const MullvadInternalDNS6 = "[fc00:bbbb:bbbb:bb01::2b:e7d3]:53"
+
+type RelayFetcher interface {
+	GetRelays() ([]mullvad.MullvadServer, error)
 }
 
-func (c *Checker) GetSOCKS() (sox []netip.AddrPort, err error) {
-	if err = c.Update(); err != nil {
-		return
+func GetSOCKS(fetcher RelayFetcher) (sox []netip.AddrPort, err error) {
+	relays, err := fetcher.GetRelays()
+	switch {
+	case err != nil:
+		return nil, err
+	case len(relays) == 0:
+		return nil, fmt.Errorf("no relays found")
+	default:
 	}
 	var tmpMap = make(map[netip.AddrPort]struct{})
 	var tmpMapMu = &sync.RWMutex{}
 	wg := &sync.WaitGroup{}
-	for _, serv := range c.m {
+	for _, serv := range relays {
 		wg.Add(1)
-		go func(endpoint *MullvadServer) {
+		go func(endpoint *mullvad.MullvadServer) {
 			defer wg.Done()
-			ips := persistentResolver(endpoint.SocksName)
-			for _, ip := range ips {
+			var ips []net.IP
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			ips, err = net.DefaultResolver.LookupIP(ctx, "ip", endpoint.SocksName)
+			if err != nil {
+				return
+			}
+			if len(ips) == 0 {
+				return
+			}
+			for _, ipa := range ips {
+				var ip netip.Addr
 				port := uint16(endpoint.SocksPort)
 				if port == 0 {
 					port = 1080
+				}
+				ip, err = netip.ParseAddr(ipa.String())
+				if err != nil {
+					continue
 				}
 				ap := netip.AddrPortFrom(ip, port)
 				tmpMapMu.RLock()
@@ -71,36 +77,60 @@ func (c *Checker) GetSOCKS() (sox []netip.AddrPort, err error) {
 	return
 }
 
-func (c *Checker) GetAndVerifySOCKS() (chan netip.AddrPort, chan error) {
-	sox, err := c.GetSOCKS()
-	var errs = make(chan error, len(sox)+1)
-	var verified = make(chan netip.AddrPort, len(sox))
-	if err != nil || len(sox) == 0 {
-		errs <- err
-		close(errs)
-		return nil, errs
+func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *int64) {
+	atomic.AddInt64(working, 1)
+	defer func() {
+		time.Sleep(10 * time.Millisecond)
+		atomic.AddInt64(working, -1)
+	}()
+	if !candidate.IsValid() {
+		errs <- fmt.Errorf("invalid address/port combo: %s", candidate.String())
+		return
 	}
-	wg := &sync.WaitGroup{}
-	wg.Add(len(sox))
+	var conn net.Conn
+	conn, err := net.DialTimeout("tcp", candidate.String(), 15*time.Second)
+	if err != nil {
+		errs <- err
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		verified <- candidate
+	}
+}
+
+func GetAndVerifySOCKS(fetcher RelayFetcher) (chan netip.AddrPort, chan error) {
+	sox, err := GetSOCKS(fetcher)
+	var errs = make(chan error, len(sox)+1)
+	switch {
+	case len(sox) == 0:
+		err = fmt.Errorf("no relays found")
+		fallthrough
+	case err != nil:
+		go func() {
+			errs <- err
+		}()
+		return nil, errs
+	default:
+	}
+
+	var (
+		verified = make(chan netip.AddrPort, len(sox))
+		working  = new(int64)
+	)
+	atomic.StoreInt64(working, 0)
+
 	for _, prx := range sox {
-		time.Sleep(250 * time.Millisecond)
-		go func(prx netip.AddrPort) {
-			defer wg.Done()
-			var conn net.Conn
-			conn, err = net.DialTimeout("tcp", prx.String(), 10*time.Second)
-			if err != nil {
-				errs <- err
-			}
-			if conn != nil {
-				_ = conn.Close()
-			}
-			if err == nil {
-				verified <- prx
-			}
-		}(prx)
+		for atomic.LoadInt64(working) > 10 {
+			time.Sleep(50 * time.Millisecond)
+		}
+		checker(prx, verified, errs, working)
 	}
 	go func() {
-		wg.Wait()
+		for atomic.LoadInt64(working) > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
 		close(errs)
 		close(verified)
 	}()

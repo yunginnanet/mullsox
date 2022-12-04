@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ func TestGetMullvadServers(t *testing.T) {
 	servers := NewChecker()
 
 	update := func() {
-		err := servers.Update()
+		err := servers.update()
 		if err != nil {
 			t.Fatalf("%s", err.Error())
 		}
