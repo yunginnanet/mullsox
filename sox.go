@@ -2,6 +2,7 @@ package mullsox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,33 +13,42 @@ import (
 	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
+/*
 const MullvadInternalDNS4 = "10.64.0.1:53"
 const MullvadInternalDNS6 = "[fc00:bbbb:bbbb:bb01::2b:e7d3]:53"
+*/
 
 type RelayFetcher interface {
-	GetRelays() ([]mullvad.MullvadServer, error)
+	GetRelays() ([]*mullvad.MullvadServer, error)
 }
 
-func GetSOCKS(fetcher RelayFetcher) (sox []netip.AddrPort, err error) {
-	relays, err := fetcher.GetRelays()
+func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
+	relays, rerr := fetcher.GetRelays()
 	switch {
-	case err != nil:
-		return nil, err
+	case rerr != nil:
+		return nil, rerr
 	case len(relays) == 0:
 		return nil, fmt.Errorf("no relays found")
 	default:
 	}
+
+	var (
+		done     = make(chan struct{})
+		errs     = make(chan error, len(relays))
+		multiErr error
+	)
+
 	var tmpMap = make(map[netip.AddrPort]struct{})
 	var tmpMapMu = &sync.RWMutex{}
 	wg := &sync.WaitGroup{}
+	var resolved = make(chan netip.AddrPort, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wg.Add(len(relays))
 	for _, serv := range relays {
-		wg.Add(1)
-		go func(endpoint *mullvad.MullvadServer) {
+		go func(host string, port int) {
 			defer wg.Done()
-			var ips []net.IP
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			ips, err = net.DefaultResolver.LookupIP(ctx, "ip", endpoint.SocksName)
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 			if err != nil {
 				return
 			}
@@ -46,35 +56,55 @@ func GetSOCKS(fetcher RelayFetcher) (sox []netip.AddrPort, err error) {
 				return
 			}
 			for _, ipa := range ips {
-				var ip netip.Addr
-				port := uint16(endpoint.SocksPort)
+				port := uint16(port)
 				if port == 0 {
 					port = 1080
 				}
-				ip, err = netip.ParseAddr(ipa.String())
+				ip, err := netip.ParseAddr(ipa.String())
 				if err != nil {
 					continue
 				}
 				ap := netip.AddrPortFrom(ip, port)
-				tmpMapMu.RLock()
-				_, ok := tmpMap[ap]
-				if ap.IsValid() && ap.Port() > 0 && !ok {
-					sox = append(sox, ap)
-					tmpMapMu.RUnlock()
-					tmpMapMu.Lock()
-					tmpMap[ap] = struct{}{}
-					tmpMapMu.Unlock()
+				if ap.IsValid() && ap.Port() > 0 {
+					resolved <- ap
+					return
+				}
+				switch {
+				case !ap.IsValid():
+					errs <- fmt.Errorf("invalid address/port combo: %s", ap.String())
+					continue
+				case ap.Port() == 0:
+					errs <- fmt.Errorf("invalid port: %d", ap.Port())
 					continue
 				}
-				tmpMapMu.RUnlock()
-				if !ap.IsValid() {
-					err = fmt.Errorf("invalid address/port combo: %s", ap.String())
-				}
 			}
-		}(&serv)
+		}(serv.SocksName, serv.SocksPort)
 	}
-	wg.Wait()
-	return
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	var sox = make([]netip.AddrPort, 0, len(relays))
+	for {
+		select {
+		case ap := <-resolved:
+			tmpMapMu.RLock()
+			_, ok := tmpMap[ap]
+			tmpMapMu.RUnlock()
+			if ok {
+				continue
+			}
+			tmpMapMu.Lock()
+			tmpMap[ap] = struct{}{}
+			sox = append(sox, ap)
+			tmpMapMu.Unlock()
+		case err := <-errs:
+			multiErr = errors.Join(multiErr, err)
+		case <-done:
+			return sox, multiErr
+		}
+	}
 }
 
 func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *int64) {

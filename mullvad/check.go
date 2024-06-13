@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
 	http "github.com/valyala/fasthttp"
 )
+
+var ErrNotMullvad = errors.New("your traffic is not being tunneled through mullvad")
 
 type MyIPDetails struct {
 	V4 *IPDetails `json:"ipv4,omitempty"`
@@ -93,10 +96,24 @@ func CheckIP(ctx context.Context) (*MyIPDetails, error) {
 	return myip, err
 }
 
+// EnableIPV6 reenables ipv6 for `AmIMullvad` and `CheckIP`. As of writing (1718243316), mullvad brok the endpoints for ipv6.am.i.mullvad entirely. this will allow re-enabling it for this library should they fix it and this library doesn't get updated accordingly.
+//
+// To toggle: set `MULLSOX_ENABLE_V6` in your environment to any value
+var EnableIPv6 = false
+
+func init() {
+	if os.Getenv("MULLSOX_ENABLE_V6") != "" {
+		EnableIPv6 = true
+	}
+}
+
 func checkIP(ipv6 bool) (details *IPDetails, err error) {
 	var target string
 	switch ipv6 {
 	case true:
+		if !EnableIPv6 {
+			return &IPDetails{}, nil
+		}
 		target = EndpointCheck6
 	default:
 		target = EndpointCheck4
@@ -130,39 +147,52 @@ func checkIP(ipv6 bool) (details *IPDetails, err error) {
 // Returns the mullvad server you are connected to if any, and any error that occured
 //
 //goland:noinspection GoNilness
-func (c *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
+func (c *Checker) AmIMullvad(ctx context.Context) ([]MullvadServer, error) {
 	me, err := CheckIP(ctx)
-	if me == nil || me.V4 == nil && me.V6 == nil || err != nil {
-		return MullvadServer{}, err
+	if me == nil || (me.V4 == nil && me.V6 == nil) {
+		return []MullvadServer{}, ErrNotMullvad
 	}
 	if me.V4 != nil && !me.V4.MullvadExitIP {
-		return MullvadServer{}, err
+		return []MullvadServer{}, err
 	}
-	if me.V6 != nil && !me.V6.MullvadExitIP {
-		return MullvadServer{}, err
-	}
+	//	if me.V6 != nil && !me.V6.MullvadExitIP {
+	//		return []MullvadServer{}, err
+	//	}
 
 	err = c.update()
 	if err != nil {
-		return MullvadServer{}, err
+		return []MullvadServer{}, err
 	}
+	servs := make([]MullvadServer, 0, 2)
 
 	isMullvad := false
 	if me.V4 != nil && me.V4.MullvadExitIP {
 		isMullvad = true
 		if c.Has(me.V4.MullvadExitIPHostname) {
-			return c.Get(me.V4.MullvadExitIPHostname), nil
+			servs = append(servs, c.Get(me.V4.MullvadExitIPHostname))
 		}
 	}
 	if me.V6 != nil && me.V6.MullvadExitIP {
 		isMullvad = true
 		if c.Has(me.V6.MullvadExitIPHostname) {
-			return c.Get(me.V6.MullvadExitIPHostname), nil
+			servs = append(servs, c.Get(me.V6.MullvadExitIPHostname))
 		}
 	}
-	if isMullvad {
-		return MullvadServer{},
-			errors.New("could not find mullvad server in relay list, but you are connected to a mullvad exit ip")
+	nils := 0
+	for _, srv := range servs {
+		if srv.Hostname == "" {
+			nils++
+		}
 	}
-	return MullvadServer{}, nil
+	if nils == 2 || nils == len(servs) || len(servs) == 0 {
+		switch isMullvad {
+		case true:
+			return servs,
+				errors.New("could not find mullvad server in relay list, but you are connected to a mullvad exit ip")
+		case false:
+			return servs, ErrNotMullvad
+		}
+	}
+
+	return servs, nil
 }

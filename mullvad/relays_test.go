@@ -20,7 +20,7 @@ func TestGetMullvadServers(t *testing.T) {
 		// t.Logf(spew.Sdump(servers.Slice()))
 	})
 	var last int
-	var lastSlice []MullvadServer
+	var lastSlice []*MullvadServer
 	t.Run("GetMullvadServersCached", func(t *testing.T) {
 		update()
 		update()

@@ -29,12 +29,12 @@ func NewChecker() *Checker {
 	return r
 }
 
-func (c *Checker) Slice() []MullvadServer {
+func (c *Checker) Slice() []*MullvadServer {
 	c.RLock()
 	defer c.RUnlock()
-	var servers []MullvadServer
+	var servers []*MullvadServer
 	for _, server := range c.m {
-		servers = append(servers, server)
+		servers = append(servers, &server)
 	}
 	return servers
 }
@@ -115,7 +115,7 @@ func (c *Checker) update() error {
 	return nil
 }
 
-func (c *Checker) GetRelays() ([]MullvadServer, error) {
+func (c *Checker) GetRelays() ([]*MullvadServer, error) {
 	if err := c.update(); err != nil {
 		return nil, err
 	}
