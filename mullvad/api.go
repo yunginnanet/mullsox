@@ -1,4 +1,4 @@
-package mullsox
+package mullvad
 
 const useragent = "mullsox/0.0.1"
 
@@ -21,6 +21,7 @@ type IPDetails struct {
 	Latitude              float64 `json:"latitude"`
 	MullvadExitIP         bool    `json:"mullvad_exit_ip"`
 	MullvadExitIPHostname string  `json:"mullvad_exit_ip_hostname"`
+	Hostname              string  `json:"hostname"`
 	MullvadServerType     string  `json:"mullvad_server_type"`
 	Blacklisted           struct {
 		Blacklisted bool `json:"blacklisted"`
@@ -33,7 +34,7 @@ type IPDetails struct {
 	Organization string `json:"organization"`
 }
 
-type MullvadServer struct {
+type Server struct {
 	Hostname             string        `json:"hostname"`
 	CountryCode          string        `json:"country_code"`
 	CountryName          string        `json:"country_name"`

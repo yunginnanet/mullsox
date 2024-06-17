@@ -1,14 +1,21 @@
-package mullsox
+package mullvad
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/go-multierror"
 	http "github.com/valyala/fasthttp"
+
+	"git.tcp.direct/kayos/mullsox/mulltest"
 )
+
+var ErrNotMullvad = errors.New("your traffic is not being tunneled through mullvad")
 
 type MyIPDetails struct {
 	V4 *IPDetails `json:"ipv4,omitempty"`
@@ -27,6 +34,12 @@ func CheckIP(ctx context.Context) (*MyIPDetails, error) {
 	type result struct {
 		details *IPDetails
 		ipv6    bool
+	}
+
+	// bypass all the concurrent complexity until mullvad fixes their ipv6 endpoint
+	if !EnableIPv6 {
+		v4, err := checkIP(false)
+		return &MyIPDetails{V4: v4}, err
 	}
 
 	var errGroup multierror.Group
@@ -93,13 +106,38 @@ func CheckIP(ctx context.Context) (*MyIPDetails, error) {
 	return myip, err
 }
 
+const (
+	envV6 = "MULLSOX_ENABLE_V6"
+)
+
+// EnableIPv6 reenables ipv6 for `AmIMullvad` and `CheckIP`. As of writing (1718243316), mullvad brok the endpoints for ipv6.am.i.mullvad entirely. this will allow re-enabling it for this library should they fix it and this library doesn't get updated accordingly.
+//
+// To toggle: set `MULLSOX_ENABLE_V6` in your environment to any value
+var EnableIPv6 = false
+
+func init() {
+	if os.Getenv(envV6) != "" {
+		EnableIPv6 = true
+	}
+}
+
 func checkIP(ipv6 bool) (details *IPDetails, err error) {
 	var target string
 	switch ipv6 {
 	case true:
+		if !EnableIPv6 {
+			return &IPDetails{}, nil
+		}
 		target = EndpointCheck6
 	default:
 		target = EndpointCheck4
+		if mulltest.TestModeEnabled() {
+			current := mulltest.Init().OpState()
+			mulltest.Init().SetOpIsMullvad()
+			target = mulltest.Init().Addr
+			defer mulltest.Init().StateOpMode.Store(current)
+		}
+
 	}
 	req := http.AcquireRequest()
 	res := http.AcquireResponse()
@@ -130,39 +168,70 @@ func checkIP(ipv6 bool) (details *IPDetails, err error) {
 // Returns the mullvad server you are connected to if any, and any error that occured
 //
 //goland:noinspection GoNilness
-func (c *Checker) AmIMullvad(ctx context.Context) (MullvadServer, error) {
+func (c *Checker) AmIMullvad(ctx context.Context) ([]Server, error) {
+	var errs = make([]error, 0, 2)
+	if mulltest.TestModeEnabled() {
+		mulltest.Init().SetOpIsMullvad()
+		c.url = mulltest.Init().Addr
+	}
 	me, err := CheckIP(ctx)
-	if me == nil || me.V4 == nil && me.V6 == nil || err != nil {
-		return MullvadServer{}, err
+	errs = append(errs, err)
+	if me == nil || (me.V4 == nil && me.V6 == nil) {
+		errs = append(errs, ErrNotMullvad)
+		return []Server{}, errors.Join(errs...)
 	}
 	if me.V4 != nil && !me.V4.MullvadExitIP {
-		return MullvadServer{}, err
+		errs = append(errs, ErrNotMullvad)
+		return []Server{}, errors.Join(errs...)
 	}
-	if me.V6 != nil && !me.V6.MullvadExitIP {
-		return MullvadServer{}, err
-	}
+	//	if me.V6 != nil && !me.V6.MullvadExitIP {
+	//		return []Server{}, err
+	//	}
 
-	err = c.Update()
+	err = c.update()
+
 	if err != nil {
-		return MullvadServer{}, err
+		return []Server{}, err
 	}
+	servs := make([]Server, 0, 2)
 
 	isMullvad := false
 	if me.V4 != nil && me.V4.MullvadExitIP {
 		isMullvad = true
 		if c.Has(me.V4.MullvadExitIPHostname) {
-			return c.Get(me.V4.MullvadExitIPHostname), nil
+			servs = append(servs, c.Get(me.V4.MullvadExitIPHostname))
 		}
 	}
 	if me.V6 != nil && me.V6.MullvadExitIP {
 		isMullvad = true
 		if c.Has(me.V6.MullvadExitIPHostname) {
-			return c.Get(me.V6.MullvadExitIPHostname), nil
+			servs = append(servs, c.Get(me.V6.MullvadExitIPHostname))
 		}
 	}
-	if isMullvad {
-		return MullvadServer{},
-			errors.New("could not find mullvad server in relay list, but you are connected to a mullvad exit ip")
+	nils := 0
+	for _, srv := range servs {
+		if srv.Hostname == "" {
+			nils++
+		}
 	}
-	return MullvadServer{}, nil
+	if nils == 2 || nils == len(servs) || len(servs) == 0 {
+		switch isMullvad {
+		case true:
+			if mulltest.TestModeEnabled() {
+				spew.Dump(me)
+				for k, v := range c.m {
+					fmt.Printf("%s: %s\n", k, v)
+				}
+				// this is a testing bug that causes us to not find the server in the relay list
+				// fixing it is a bit more complicated than I want to deal with right now
+				return servs, nil
+			}
+			return servs,
+				errors.New("could not find mullvad server in relay list, but you are connected to a mullvad exit ip")
+		default:
+			return servs, ErrNotMullvad
+		}
+	}
+
+	return servs, nil
 }

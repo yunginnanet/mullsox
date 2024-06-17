@@ -1,40 +1,48 @@
-package mullsox
+package mullvad
 
 import (
 	"testing"
+
+	"github.com/davecgh/go-spew/spew"
+
+	"git.tcp.direct/kayos/mullsox/mulltest"
 )
 
 func TestGetMullvadServers(t *testing.T) {
+	mt := mulltest.Init()
+	mt.SetOpRelays()
+	mt.SetIsMullvad()
 	servers := NewChecker()
 
-	update := func() {
-		err := servers.Update()
+	update := func(srv *Checker) {
+		err := srv.update()
 		if err != nil {
 			t.Fatalf("%s", err.Error())
 		}
-		t.Logf("got %d servers", len(servers.Slice()))
+		t.Logf("got %d servers for uri %s", len(srv.Slice()), srv.url)
 	}
 
 	t.Run("GetMullvadServers", func(t *testing.T) {
-		update()
-		// t.Logf(spew.Sdump(servers.Slice()))
+		update(servers)
+		t.Log(spew.Sdump(servers.Slice()))
 	})
 	var last int
-	var lastSlice []MullvadServer
+	var lastSlice []Server
 	t.Run("GetMullvadServersCached", func(t *testing.T) {
-		update()
-		update()
-		update()
-		update()
-		update()
-		update()
-		update()
+		update(servers)
+		update(servers)
+		update(servers)
+		update(servers)
+		update(servers)
+		update(servers)
+		update(servers)
 		last = servers.cachedSize
 		lastSlice = servers.Slice()
 	})
 	t.Run("GetMullvadServersChanged", func(t *testing.T) {
-		servers.url = "https://api.mullvad.net/www/relays/openvpn/"
-		update()
+		servers.url = servers.url + "/openvpn/"
+		t.Logf("changing url to %s", servers.url)
+		update(servers)
 		if last == servers.cachedSize {
 			t.Fatalf("expected %d to not equal %d", last, servers.cachedSize)
 		}

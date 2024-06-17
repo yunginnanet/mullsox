@@ -2,105 +2,175 @@ package mullsox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"git.tcp.direct/kayos/mullsox/mulltest"
+	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
-func persistentResolver(hostname string) []netip.Addr {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var ips []netip.Addr
-	if hostname == "" {
-		return ips
-	}
-	for n := 0; n < 5; n++ {
-		var err error
-		var res []netip.Addr
-		go func() {
-			res, err = net.DefaultResolver.LookupNetIP(ctx, "ip", hostname)
-			if err == nil && res != nil && len(res) > 0 {
-				ips = res
-				cancel()
-			}
-		}()
-		time.Sleep(1 * time.Second)
-	}
-	<-ctx.Done()
-	return ips
+/*
+const MullvadInternalDNS4 = "10.64.0.1:53"
+const MullvadInternalDNS6 = "[fc00:bbbb:bbbb:bb01::2b:e7d3]:53"
+*/
+
+type RelayFetcher interface {
+	GetRelays() ([]mullvad.Server, error)
 }
 
-func (c *Checker) GetSOCKS() (sox []netip.AddrPort, err error) {
-	if err = c.Update(); err != nil {
-		return
+func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
+	relays, rerr := fetcher.GetRelays()
+	switch {
+	case rerr != nil:
+		return nil, rerr
+	case len(relays) == 0:
+		return nil, fmt.Errorf("no relays found")
+	default:
 	}
+
+	var (
+		done     = make(chan struct{})
+		errs     = make(chan error, len(relays))
+		multiErr error
+	)
+
 	var tmpMap = make(map[netip.AddrPort]struct{})
 	var tmpMapMu = &sync.RWMutex{}
 	wg := &sync.WaitGroup{}
-	for _, serv := range c.m {
-		wg.Add(1)
-		go func(endpoint *MullvadServer) {
+	var resolved = make(chan netip.AddrPort, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wg.Add(len(relays))
+	for _, serv := range relays {
+		go func(host string, port int) {
 			defer wg.Done()
-			ips := persistentResolver(endpoint.SocksName)
-			for _, ip := range ips {
-				port := uint16(endpoint.SocksPort)
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return
+			}
+			if len(ips) == 0 {
+				return
+			}
+			for _, ipa := range ips {
+				port := uint16(port)
 				if port == 0 {
 					port = 1080
 				}
-				ap := netip.AddrPortFrom(ip, port)
-				tmpMapMu.RLock()
-				_, ok := tmpMap[ap]
-				if ap.IsValid() && ap.Port() > 0 && !ok {
-					sox = append(sox, ap)
-					tmpMapMu.RUnlock()
-					tmpMapMu.Lock()
-					tmpMap[ap] = struct{}{}
-					tmpMapMu.Unlock()
+				ip, err := netip.ParseAddr(ipa.String())
+				if err != nil {
 					continue
 				}
-				tmpMapMu.RUnlock()
-				if !ap.IsValid() {
-					err = fmt.Errorf("invalid address/port combo: %s", ap.String())
+				ap := netip.AddrPortFrom(ip, port)
+				if ap.IsValid() && ap.Port() > 0 {
+					resolved <- ap
+					return
+				}
+				switch {
+				case !ap.IsValid():
+					errs <- fmt.Errorf("invalid address/port combo: %s", ap.String())
+					continue
+				case ap.Port() == 0:
+					errs <- fmt.Errorf("invalid port: %d", ap.Port())
+					continue
 				}
 			}
-		}(&serv)
+		}(serv.SocksName, serv.SocksPort)
 	}
-	wg.Wait()
-	return
-}
 
-func (c *Checker) GetAndVerifySOCKS() (chan netip.AddrPort, chan error) {
-	sox, err := c.GetSOCKS()
-	var errs = make(chan error, len(sox)+1)
-	var verified = make(chan netip.AddrPort, len(sox))
-	if err != nil || len(sox) == 0 {
-		errs <- err
-		close(errs)
-		return nil, errs
-	}
-	wg := &sync.WaitGroup{}
-	wg.Add(len(sox))
-	for _, prx := range sox {
-		time.Sleep(250 * time.Millisecond)
-		go func(prx netip.AddrPort) {
-			defer wg.Done()
-			var conn net.Conn
-			conn, err = net.DialTimeout("tcp", prx.String(), 10*time.Second)
-			if err != nil {
-				errs <- err
-			}
-			if conn != nil {
-				_ = conn.Close()
-			}
-			if err == nil {
-				verified <- prx
-			}
-		}(prx)
-	}
 	go func() {
 		wg.Wait()
+		close(done)
+	}()
+	var sox = make([]netip.AddrPort, 0, len(relays))
+	for {
+		select {
+		case ap := <-resolved:
+			tmpMapMu.RLock()
+			_, ok := tmpMap[ap]
+			tmpMapMu.RUnlock()
+			if ok {
+				continue
+			}
+			tmpMapMu.Lock()
+			tmpMap[ap] = struct{}{}
+			sox = append(sox, ap)
+			tmpMapMu.Unlock()
+		case err := <-errs:
+			multiErr = errors.Join(multiErr, err)
+		case <-done:
+			return sox, multiErr
+		}
+	}
+}
+
+func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *int64) {
+	atomic.AddInt64(working, 1)
+	defer func() {
+		time.Sleep(10 * time.Millisecond)
+		atomic.AddInt64(working, -1)
+	}()
+	if !candidate.IsValid() {
+		errs <- fmt.Errorf("invalid address/port combo: %s", candidate.String())
+		return
+	}
+	if mulltest.TestModeEnabled() {
+		addruri := mulltest.Init().Addr
+		if addruri == "" {
+			panic("no test server address")
+		}
+		serv := strings.TrimSuffix(strings.Split(addruri, "http://")[1], "/")
+		candidate = netip.MustParseAddrPort(serv)
+	}
+	var conn net.Conn
+	conn, err := net.DialTimeout("tcp", candidate.String(), 15*time.Second)
+	if err != nil {
+		errs <- err
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		verified <- candidate
+	}
+}
+
+func GetAndVerifySOCKS(fetcher RelayFetcher) (chan netip.AddrPort, chan error) {
+	sox, err := GetSOCKS(fetcher)
+	var errs = make(chan error, len(sox)+1)
+	switch {
+	case len(sox) == 0:
+		err = fmt.Errorf("no relays found")
+		fallthrough
+	case err != nil:
+		go func() {
+			errs <- err
+		}()
+		return nil, errs
+	default:
+	}
+
+	var (
+		verified = make(chan netip.AddrPort, len(sox))
+		working  = new(int64)
+	)
+	atomic.StoreInt64(working, 0)
+
+	for _, prx := range sox {
+		for atomic.LoadInt64(working) > 10 {
+			time.Sleep(50 * time.Millisecond)
+		}
+		checker(prx, verified, errs, working)
+	}
+	go func() {
+		for atomic.LoadInt64(working) > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
 		close(errs)
 		close(verified)
 	}()
