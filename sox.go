@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"git.tcp.direct/kayos/mullsox/mulltest"
 	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
@@ -116,6 +118,14 @@ func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan e
 	if !candidate.IsValid() {
 		errs <- fmt.Errorf("invalid address/port combo: %s", candidate.String())
 		return
+	}
+	if mulltest.TestModeEnabled() {
+		addruri := mulltest.Init().Addr
+		if addruri == "" {
+			panic("no test server address")
+		}
+		serv := strings.TrimSuffix(strings.Split(addruri, "http://")[1], "/")
+		candidate = netip.MustParseAddrPort(serv)
 	}
 	var conn net.Conn
 	conn, err := net.DialTimeout("tcp", candidate.String(), 15*time.Second)
