@@ -3,10 +3,16 @@ package mullsox
 import (
 	"testing"
 
+	"git.tcp.direct/kayos/mullsox/mulltest"
 	"git.tcp.direct/kayos/mullsox/mullvad"
 )
 
 func TestChecker_GetSOCKS(t *testing.T) {
+	mt := mulltest.Init()
+	mt.SetOpRelays()
+
+	t.Logf("test server: %s", mt.Addr)
+
 	c := mullvad.NewChecker()
 	t.Run("GetSOCKS", func(t *testing.T) {
 		gotSox, err := GetSOCKS(c)

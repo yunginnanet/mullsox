@@ -19,7 +19,7 @@ const MullvadInternalDNS6 = "[fc00:bbbb:bbbb:bb01::2b:e7d3]:53"
 */
 
 type RelayFetcher interface {
-	GetRelays() ([]*mullvad.MullvadServer, error)
+	GetRelays() ([]mullvad.Server, error)
 }
 
 func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
