@@ -110,8 +110,9 @@ func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
 	}
 }
 
-func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *atomic.Int64) {
-	for working.Load() > 10 {
+func checker(candidate netip.AddrPort, verified chan netip.AddrPort,
+	errs chan error, working *atomic.Int64, opt *checkerOptions) {
+	for working.Load() > int64(opt.WorkerLimit) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	working.Add(1)
@@ -124,6 +125,7 @@ func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan e
 		return
 	}
 	if mulltest.TestModeEnabled() {
+		println("checker: test mode enabled")
 		addruri := mulltest.Init().Addr
 		if addruri == "" {
 			panic("no test server address")
@@ -132,19 +134,56 @@ func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan e
 		candidate = netip.MustParseAddrPort(serv)
 	}
 	var conn net.Conn
-	conn, err := net.DialTimeout("tcp", candidate.String(), 15*time.Second)
+	conn, err := net.DialTimeout("tcp", candidate.String(), opt.Timeout)
+	defer func() {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}()
 	if err != nil {
 		errs <- err
 	}
-	if conn != nil {
-		_ = conn.Close()
-	}
+
 	if err == nil {
 		verified <- candidate
 	}
 }
 
-func GetAndVerifySOCKS(fetcher RelayFetcher) (chan netip.AddrPort, chan error) {
+type checkerOptions struct {
+	WorkerLimit int
+	Timeout     time.Duration
+}
+
+var defChckOpt = checkerOptions{
+	WorkerLimit: 10,
+	Timeout:     10 * time.Second,
+}
+
+type CheckerOption func(*checkerOptions)
+
+func CheckerWorkerLimit(n int) CheckerOption {
+	return func(opt *checkerOptions) {
+		opt.WorkerLimit = n
+	}
+}
+
+func CheckerTimeout(d time.Duration) CheckerOption {
+	return func(opt *checkerOptions) {
+		opt.Timeout = d
+	}
+}
+
+func GetAndVerifySOCKS(fetcher RelayFetcher, options ...CheckerOption) (chan netip.AddrPort, chan error) {
+	o := defChckOpt
+	opt := &o
+	for _, op := range options {
+		op(opt)
+	}
+
+	if opt.WorkerLimit <= 1 {
+		opt.WorkerLimit = 2
+	}
+
 	sox, err := GetSOCKS(fetcher)
 	var errs = make(chan error, len(sox)+1)
 	switch {
@@ -166,7 +205,7 @@ func GetAndVerifySOCKS(fetcher RelayFetcher) (chan netip.AddrPort, chan error) {
 	working.Store(0)
 
 	for _, prx := range sox {
-		go checker(prx, verified, errs, working)
+		go checker(prx, verified, errs, working, opt)
 	}
 	go func() {
 		for !working.CompareAndSwap(0, 0) {
