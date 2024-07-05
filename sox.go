@@ -87,6 +87,7 @@ func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
 		wg.Wait()
 		close(done)
 	}()
+
 	var sox = make([]netip.AddrPort, 0, len(relays))
 	for {
 		select {
@@ -109,11 +110,14 @@ func GetSOCKS(fetcher RelayFetcher) ([]netip.AddrPort, error) {
 	}
 }
 
-func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *int64) {
-	atomic.AddInt64(working, 1)
+func checker(candidate netip.AddrPort, verified chan netip.AddrPort, errs chan error, working *atomic.Int64) {
+	for working.Load() > 10 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	working.Add(1)
 	defer func() {
 		time.Sleep(10 * time.Millisecond)
-		atomic.AddInt64(working, -1)
+		working.Add(-1)
 	}()
 	if !candidate.IsValid() {
 		errs <- fmt.Errorf("invalid address/port combo: %s", candidate.String())
@@ -157,18 +161,15 @@ func GetAndVerifySOCKS(fetcher RelayFetcher) (chan netip.AddrPort, chan error) {
 
 	var (
 		verified = make(chan netip.AddrPort, len(sox))
-		working  = new(int64)
+		working  = &atomic.Int64{}
 	)
-	atomic.StoreInt64(working, 0)
+	working.Store(0)
 
 	for _, prx := range sox {
-		for atomic.LoadInt64(working) > 10 {
-			time.Sleep(50 * time.Millisecond)
-		}
-		checker(prx, verified, errs, working)
+		go checker(prx, verified, errs, working)
 	}
 	go func() {
-		for atomic.LoadInt64(working) > 0 {
+		for !working.CompareAndSwap(0, 0) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		close(errs)
